@@ -20,7 +20,7 @@ String serverPort = "5000";
 String targetStream = serverName + serverPort + "/upload";
 
 // Connect to server using IP address
-    IPAddress serverIP(192,168,1,6);
+IPAddress serverIP(192, 168, 1, 6);
 
 
 camera_config_t config;
@@ -51,27 +51,27 @@ void setup() {
   // Konfigurasi kamera
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
-  config.pin_d0 = 5;
-  config.pin_d1 = 18;
-  config.pin_d2 = 19;
-  config.pin_d3 = 21;
-  config.pin_d4 = 36;
-  config.pin_d5 = 39;
-  config.pin_d6 = 34;
-  config.pin_d7 = 35;
-  config.pin_xclk = 0;
-  config.pin_pclk = 22;
-  config.pin_vsync = 25;
-  config.pin_href = 23;
-  config.pin_sscb_sda = 26;
-  config.pin_sscb_scl = 27;
-  config.pin_pwdn = 32;   // Set ke -1 jika tidak digunakan
-  config.pin_reset = -1;  // Set ke -1 jika tidak digunakan
+config.pin_d0 = 5;      // Data pin 0
+config.pin_d1 = 18;     // Data pin 1
+config.pin_d2 = 19;     // Data pin 2
+config.pin_d3 = 21;     // Data pin 3
+config.pin_d4 = 36;     // Data pin 4
+config.pin_d5 = 39;     // Data pin 5
+config.pin_d6 = 34;     // Data pin 6
+config.pin_d7 = 35;     // Data pin 7
+config.pin_xclk = 0;    // XCLK pin
+config.pin_pclk = 22;    // PCLK pin
+config.pin_vsync = 25;   // VSYNC pin
+config.pin_href = 23;    // HREF pin
+config.pin_sscb_sda = 26; // SDA pin untuk I2C
+config.pin_sscb_scl = 27; // SCL pin untuk I2C
+config.pin_pwdn = 32;    // Power down pin, set ke -1 jika tidak digunakan
+config.pin_reset = -1;   // Reset pin, set ke -1 jika tidak digunakan
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;  // Untuk streaming
 
   // Inisialisasi kamera
-  config.frame_size = FRAMESIZE_FHD;  // Ukuran frame
+  config.frame_size = FRAMESIZE_VGA;  // Ukuran frame
   config.jpeg_quality = 12;           // Kualitas JPEG
   config.fb_count = 1;                // Untuk modul AI Thinker
 
@@ -103,11 +103,12 @@ void setup() {
 
 void loop() {
   WiFiClient client = server.available();
-
+  
+  camera_fb_t* fb = esp_camera_fb_get();  // Ambil foto
   // if (!client) {
   //   return;
-    sendToServer(client);
-    delay(5000);
+  // sendToServer(client);
+  // delay(5000);
   // }
 
   // // Tunggu permintaan klien
@@ -121,27 +122,28 @@ void loop() {
   // if (request.indexOf("/foto") != -1) {
   //   takePhoto(client);
   // } else if (request.indexOf("/video") != -1) {
-    // camera_fb_t *fb = esp_camera_fb_get();
-    // if (!fb) {
-    //     Serial.println("Camera capture failed");
-    //     return;
-    // }
+  
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    return;
+    delay(1000);
+  }
 
-    // // Send the frame to the Flask server
-    // if (sendFrameToServer(fb, client)) {
-    //     Serial.println("Frame sent successfully");
-    // } else {
-    //     Serial.println("Failed to send frame");
-    // }
+  // Send the frame to the Flask server
+  if (sendFrameToServer(fb, client)) {
+    Serial.println("Frame sent successfully");
+  } else {
+    Serial.println("Failed to send frame");
+  }
 
-    // esp_camera_fb_return(fb);
-    // delay(100); // Delay to control the frame rate
-  // delay(1000);
+  
+  esp_camera_fb_return(fb);
+  delay(100);
   // }
 
 
-  // client.stop();
-  // Serial.println("Client disconnected");
+  client.stop();
+  Serial.println("Client disconnected");
 }
 
 void takePhoto(WiFiClient& client) {
@@ -154,8 +156,7 @@ void takePhoto(WiFiClient& client) {
     client.println("HTTP/1.1 500 Internal Server Error\r\n\r\nCamera capture failed");
     digitalWrite(FLASH_PIN, LOW);  // Matikan flash
     return;
-  }else
-  {
+  } else {
 
     // Kirim header respons HTTP
     client.println("HTTP/1.1 200 OK");
@@ -170,37 +171,35 @@ void takePhoto(WiFiClient& client) {
 }
 
 bool sendFrameToServer(camera_fb_t* fb, WiFiClient& client) {
-    
-  String target = serverName + "/upload";
-    if (!client.connect(serverIP, 5000)) {
-        Serial.println("Connection to server failed");
-        return false;
+
+  if (!client.connect(ip.c_str(), 5000)) {
+    Serial.println("Connection to server failed");
+    return false;
+  }
+  String boundary = "---------------------------14737809831466499882746641449";
+  String body = "--" + boundary + "\r\n";
+  body += "Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"\r\n";
+  body += "Content-Type: image/jpeg\r\n\r\n";
+
+  client.println("POST /upload HTTP/1.1");
+  client.println("Host: " + ip );
+  client.println("Content-Type: multipart/form-data; boundary=" + boundary);
+  client.println("Content-Length: " + String(body.length() + fb->len + 4 + boundary.length() + 6));
+  client.println();  // This will add an extra newline
+  client.print(body);
+  client.write(fb->buf, fb->len);
+  client.println("\r\n--" + boundary + "--");
+
+  // Wait for server response
+  while (client.connected() || client.available()) {
+    if (client.available()) {
+      String line = client.readStringUntil('\n');
+      Serial.println(line);
     }
+  }
 
-    String boundary = "---------------------------14737809831466499882746641449";
-    String body = "--" + boundary + "\r\n";
-    body += "Content-Disposition: form-data; name=\"file\"; filename=\"frame.jpg\"\r\n";
-    body += "Content-Type: image/jpeg\r\n\r\n";
-
-    client.print("POST "+ target+" HTTP/1.1\r\n");
-    client.print("Host: " + ip + "\r\n");
-    client.print("Content-Type: multipart/form-data; boundary=" + boundary + "\r\n");
-    client.print("Content-Length: " + String(body.length() + fb->len + 4 + boundary.length() + 6) + "\r\n");
-    client.print("\r\n");
-    client.print(body);
-    client.write(fb->buf, fb->len);
-    client.print("\r\n--" + boundary + "--\r\n");
-
-    // Wait for server response
-    while (client.connected() || client.available()) {
-        if (client.available()) {
-            String line = client.readStringUntil('\n');
-            Serial.println(line);
-        }
-    }
-
-    client.stop();
-    return true;
+  client.stop();
+  return true;
 }
 
 
